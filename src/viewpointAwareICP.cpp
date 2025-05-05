@@ -13,7 +13,7 @@ pcl::PointCloud<PointType>::Ptr ViewpointAwareICP::computeNormals(pcl::PointClou
 
     pcl::search::KdTree<pcl::PointXYZI>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZI>());
     ne.setSearchMethod(tree);
-    ne.setKSearch(10);
+    ne.setKSearch(30);
     ne.compute(*normals);
 
     pcl::PointCloud<PointType>::Ptr cloud_with_normals(new pcl::PointCloud<PointType>());
@@ -22,12 +22,45 @@ pcl::PointCloud<PointType>::Ptr ViewpointAwareICP::computeNormals(pcl::PointClou
     return cloud_with_normals;
 }
 
+pcl::PointCloud<PointType>::Ptr ViewpointAwareICP::voxelDownsample(
+    const pcl::PointCloud<PointType>::Ptr& cloud,
+    float leaf_size)
+{
+    pcl::VoxelGrid<PointType> voxel;
+    voxel.setInputCloud(cloud);
+    voxel.setLeafSize(leaf_size, leaf_size, leaf_size);
+
+    pcl::PointCloud<PointType>::Ptr downsampled(new pcl::PointCloud<PointType>());
+    voxel.filter(*downsampled);
+    return downsampled;
+}
+
+pcl::PointCloud<PointType>::Ptr ViewpointAwareICP::denoisePointCloud(
+    const pcl::PointCloud<PointType>::Ptr& cloud,
+    int mean_k,
+    double stddev_mul_thresh)
+{
+    pcl::StatisticalOutlierRemoval<PointType> sor;
+    sor.setInputCloud(cloud);
+    sor.setMeanK(mean_k);
+    sor.setStddevMulThresh(stddev_mul_thresh);
+
+    auto filtered = boost::make_shared<pcl::PointCloud<PointType>>();
+    sor.filter(*filtered);
+    return filtered;
+}
+
 void ViewpointAwareICP::setInputTarget(pcl::PointCloud<pcl::PointXYZI>::Ptr cloud) {
     if (!cloud || cloud->empty()) {
         std::cerr << "Input target cloud is empty!" << std::endl;
         return;
     }
     targetCloud_ = computeNormals(cloud);
+
+    targetCloud_ = voxelDownsample(targetCloud_, 0.2f);
+
+    targetCloud_ = denoisePointCloud(targetCloud_, 3, 0.8);
+
     initTgt_ = true;
 }
 
@@ -41,6 +74,11 @@ void ViewpointAwareICP::setInputSource(pcl::PointCloud<pcl::PointXYZI>::Ptr clou
         return;
     }
     sourceCloud_ = computeNormals(cloud);
+
+    sourceCloud_ = voxelDownsample(sourceCloud_, 0.2f);
+
+    sourceCloud_ = denoisePointCloud(sourceCloud_, 3, 0.8);
+
     initSrc_ = true;
 }
 
@@ -53,8 +91,8 @@ void ViewpointAwareICP::setInitialGuess(Eigen::Isometry3d initialGuess) {
 
 void ViewpointAwareICP::transformPointCloud(pcl::PointCloud<PointType>::Ptr cloudIn, Eigen::Matrix4d transform_matrix){
     for (auto& pt : cloudIn->points) {
-        Eigen::Vector4d point(pt.x, pt.y, pt.z, 1.0);  // Homogeneous 좌표로 변환
-        Eigen::Vector4d transformed_point = transform_matrix * point;  // 변환 적용
+        Eigen::Vector4d point(pt.x, pt.y, pt.z, 1.0);
+        Eigen::Vector4d transformed_point = transform_matrix * point;
         
         pt.x = transformed_point.x();
         pt.y = transformed_point.y();
@@ -62,13 +100,57 @@ void ViewpointAwareICP::transformPointCloud(pcl::PointCloud<PointType>::Ptr clou
     }
 }
 
-double ViewpointAwareICP::getFitnessScoreNupdateWeights(pcl::CorrespondencesPtr corres, std::vector<double> weights){
+double ViewpointAwareICP::getFitnessScoreNupdateWeightsSecondStage(pcl::CorrespondencesPtr corres){
     double sum_distance = 0.0;
 
     for (size_t i = 0; i < corres->size(); ++i)
     {
         float d = corres->at(i).distance;
-        corres->at(i).weight = static_cast<float>(weights[corres->at(i).index_match]);;
+        float w = 0.0f;
+
+        if (is_valid_src_pose && is_valid_tgt_pose) {
+            float src_w = static_cast<float>(src_scores[corres->at(i).index_query]);
+            float tgt_w = static_cast<float>(tgt_scores[corres->at(i).index_match]);
+            w = std::min(src_w, tgt_w);
+        }
+        else if (is_valid_src_pose && !is_valid_tgt_pose) {
+            w = static_cast<float>(tgt_scores[corres->at(i).index_match]);
+        }
+        else if (!is_valid_src_pose && is_valid_tgt_pose) {
+            w = static_cast<float>(src_scores[corres->at(i).index_query]);
+        }
+
+        corres->at(i).weight = w;
+
+        sum_distance += std::sqrt(d);
+    }
+
+    return sum_distance / static_cast<double>(corres->size());
+}
+
+double ViewpointAwareICP::getFitnessScoreNupdateWeightsFirstStage(pcl::CorrespondencesPtr corres){
+    double sum_distance = 0.0;
+
+    for (size_t i = 0; i < corres->size(); ++i)
+    {
+        float d = corres->at(i).distance;
+        float w = 0.0f;
+
+        if (is_valid_src_pose && is_valid_tgt_pose) {
+            float src_w = static_cast<float>(src_scores[corres->at(i).index_query]);
+            float tgt_w = static_cast<float>(tgt_scores[corres->at(i).index_match]);
+            w = std::max(src_w, tgt_w);
+        }
+        else if (is_valid_src_pose && !is_valid_tgt_pose) {
+            w = static_cast<float>(src_scores[corres->at(i).index_query]);
+            // w = 1.0f;
+        }
+        else if (!is_valid_src_pose && is_valid_tgt_pose) {
+            w = static_cast<float>(tgt_scores[corres->at(i).index_match]);
+        }
+
+        corres->at(i).weight = w;
+
         sum_distance += std::sqrt(d);
     }
 
@@ -81,13 +163,14 @@ double ViewpointAwareICP::getFitnessScoreNupdateUniformWeights(pcl::Corresponden
     for (size_t i = 0; i < corres->size(); ++i)
     {
         float d = corres->at(i).distance;
-        corres->at(i).weight = 1.0f;
+
+        corres->at(i).weight = 1.f;
+
         sum_distance += std::sqrt(d);
     }
 
     return sum_distance / static_cast<double>(corres->size());
 }
-
 
 void ViewpointAwareICP::align(pcl::PointCloud<PointType>& result_pc) {
     if (!initSrc_ || !initTgt_ || !initGuess_) {
@@ -95,19 +178,26 @@ void ViewpointAwareICP::align(pcl::PointCloud<PointType>& result_pc) {
         return;
     }
 
+    if (!is_valid_src_pose && !is_valid_tgt_pose) {
+        std::cerr << "There is no valid pose information!!" << std::endl;
+        return;
+    }
+
     pcl::PointCloud<PointType>::Ptr temp(new pcl::PointCloud<PointType>());
     pcl::transformPointCloudWithNormals(*sourceCloud_, *temp, initialGuess_.matrix());
     sourceCloud_ = temp;
-
-    V_SCORE score_s(initialGuess_.matrix().block<3,1>(3,0), sourceCloud_);
-    V_SCORE score_t(Eigen::Vector3d::Zero(), targetCloud_);
-
     // std::vector<double> src_scores, tgt_scores;
     src_scores.clear();
     tgt_scores.clear();
 
-    *sourceCloud_ = *score_s.getTopScoredCloud(0.6, src_scores);
-    *targetCloud_ = *score_t.getTopScoredCloud(0.6, tgt_scores); 
+    if(is_valid_src_pose){
+        score_s.initialize(initialGuess_.matrix().block<3,1>(3,0), sourceCloud_);
+        *sourceCloud_ = *score_s.getTopScoredCloud(0.7, src_scores);
+    }
+    if(is_valid_tgt_pose){
+        score_t.initialize(Eigen::Vector3d::Zero(), targetCloud_);
+        *targetCloud_ = *score_t.getTopScoredCloud(0.7, tgt_scores); 
+    }
 
     pcl::search::KdTree<PointType>::Ptr target_kdtree_(new pcl::search::KdTree<PointType>());
     target_kdtree_->setInputCloud(targetCloud_);
@@ -142,12 +232,11 @@ void ViewpointAwareICP::align(pcl::PointCloud<PointType>& result_pc) {
             std::cout << "No correspondences found at iteration " << iter << std::endl;
             break;
         }
-        // std::vector<float> weights(targetCloud_->points.size(), 1.0f);
 
-        if(!second_stage) fitness_score_ = getFitnessScoreNupdateUniformWeights(correspondences);
-        else fitness_score_ = getFitnessScoreNupdateWeights(correspondences, tgt_scores);
-        // fitness_score_ = getFitnessScoreNupdateUniformWeights(correspondences);
-        // // fitness_score_ = getFitnessScoreNupdateWeights(correspondences, tgt_scores);
+        if(!second_stage) fitness_score_ = getFitnessScoreNupdateWeightsFirstStage(correspondences);
+        // if(!second_stage) fitness_score_ = getFitnessScoreNupdateUniformWeights(correspondences);
+        else fitness_score_ = getFitnessScoreNupdateWeightsSecondStage(correspondences);
+
 
         Eigen::Matrix4f delta = Eigen::Matrix4f::Identity();
         transformation_estimation->estimateRigidTransformation(*current_source, *targetCloud_, *correspondences, delta);
@@ -170,28 +259,28 @@ void ViewpointAwareICP::align(pcl::PointCloud<PointType>& result_pc) {
 
         if (second_stage && trans_diff_norm < 0.00001){
             converged_ = true;
-        // if (trans_diff_norm < eps_transform_ && fitness_score_ < eps_euclidean_fitness_)
             break;
         }
-        // if (trans_diff_norm < eps_transform_*2 && fitness_score_ < eps_euclidean_fitness_*2){
         if (trans_diff_norm < 0.001){
-            // break;     
-            // auto uv_score = score_s.getUncertainVisiblityScores(sourceCloud_, targetCloud_);
-            // auto tgt_uv_score = score_s.getUncertainVisiblityScores(targetCloud_,sourceCloud_);
 
             second_stage = true;
             std::cout << "second" << std::endl;
         }
         if(second_stage){
-            auto tgt_uv_score = score_t.getUncertainVisiblityScores(targetCloud_,sourceCloud_, (initialGuess_.matrix()* T_total.cast<double>()).block<3,1>(0,3));
-            tgt_scores = tgt_uv_score;
+            if(is_valid_src_pose){
+                auto tgt_uv_score = score_t.getUncertainVisiblityScores(targetCloud_,current_source, (initialGuess_.matrix()* T_total.cast<double>()).block<3,1>(0,3));
+                tgt_scores = tgt_uv_score;
+            }
+            if(is_valid_tgt_pose){
+                auto src_uv_score = score_s.getUncertainVisiblityScores(current_source,targetCloud_, Eigen::Vector3d::Zero());
+                src_scores = src_uv_score;
+            }
         }
 
         iter++;
     }
 
-    transformPointCloud(sourceCloud_, initialGuess_.matrix());
     final_transformation_.matrix() = initialGuess_.matrix() * T_total.cast<double>();
-    // final_transformation_ = final_transformation_ * initialGuess_;
-    result_pc = *sourceCloud_; 
+
+    result_pc = *current_source; 
 }

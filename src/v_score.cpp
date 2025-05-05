@@ -2,7 +2,13 @@
 V_SCORE::V_SCORE(Eigen::Vector3d camera_position, pcl::PointCloud<PointType>::Ptr pointcloud) {
     initializeVariables(camera_position, pointcloud);
 
-    denoisePointCloud();
+    setVectorSize(); 
+
+    calculateScore();
+}
+
+void V_SCORE::initialize(Eigen::Vector3d camera_position, pcl::PointCloud<PointType>::Ptr pointcloud) {
+    initializeVariables(camera_position, pointcloud);
 
     setVectorSize(); 
 
@@ -10,25 +16,17 @@ V_SCORE::V_SCORE(Eigen::Vector3d camera_position, pcl::PointCloud<PointType>::Pt
 }
 
 void V_SCORE::initializeVariables(Eigen::Vector3d camera_position, pcl::PointCloud<PointType>::Ptr pointcloud) {
-    original_cloud_ = pcl::PointCloud<PointType>::Ptr(new pcl::PointCloud<PointType>());
-    denoise_cloud_ = pcl::PointCloud<PointType>::Ptr(new pcl::PointCloud<PointType>());
+    // original_cloud_ = pcl::PointCloud<PointType>::Ptr(new pcl::PointCloud<PointType>());
+    input_cloud_ = pcl::PointCloud<PointType>::Ptr(new pcl::PointCloud<PointType>());
     projected_cloud_ = pcl::PointCloud<PointType>::Ptr(new pcl::PointCloud<PointType>());
     // normals_ = pcl::PointCloud<pcl::Normal>::Ptr(new pcl::PointCloud<pcl::Normal>());
 
     camera_position_ = camera_position;
-    original_cloud_ = pointcloud;
-}
-
-void V_SCORE::denoisePointCloud(){
-    pcl::StatisticalOutlierRemoval<PointType> sor;
-    sor.setInputCloud(original_cloud_);
-    sor.setMeanK(3);
-    sor.setStddevMulThresh(0.8);
-    sor.filter(*denoise_cloud_);
+    input_cloud_ = pointcloud;
 }
 
 void V_SCORE::setVectorSize(){
-    int denoise_size = denoise_cloud_->points.size();
+    int denoise_size = input_cloud_->points.size();
     original_dist_vec_.resize(denoise_size);
     vis_score_vec_.resize(denoise_size);
     normal_score_vec_.resize(denoise_size);
@@ -38,7 +36,7 @@ void V_SCORE::setVectorSize(){
 }
 
 void V_SCORE::projectPointCloud(){
-    *projected_cloud_ = *denoise_cloud_;
+    *projected_cloud_ = *input_cloud_;
     for (int idx=0; idx<projected_cloud_->points.size(); idx++){
         auto &point = projected_cloud_->points[idx];
         double x = point.x - camera_position_[0];
@@ -108,7 +106,7 @@ void V_SCORE::projectPointCloud(pcl::PointCloud<PointType>::Ptr &in_cloud, Eigen
 
 
 void V_SCORE::calculateScore(){
-    for (int idx=0; idx<denoise_cloud_->points.size(); idx++){
+    for (int idx=0; idx<input_cloud_->points.size(); idx++){
         double normal_score = calculateNormalScore(idx);
         double mix_score = normal_score;
         mix_score_vec_[idx] = mix_score;
@@ -117,13 +115,13 @@ void V_SCORE::calculateScore(){
 
 inline double V_SCORE::calculateNormalScore(int idx){
     Eigen::Vector3d point_eigen(
-        denoise_cloud_->points[idx].x,
-        denoise_cloud_->points[idx].y,
-        denoise_cloud_->points[idx].z
+        input_cloud_->points[idx].x,
+        input_cloud_->points[idx].y,
+        input_cloud_->points[idx].z
     );
     Eigen::Vector3d los = point_eigen - camera_position_;
     double normal_score = 0;
-    auto nor_pcl = denoise_cloud_->points[idx];
+    auto nor_pcl = input_cloud_->points[idx];
     Eigen::Vector3d normal = {nor_pcl.normal_x, nor_pcl.normal_y, nor_pcl.normal_z};
 
     Eigen::Matrix3d z_filter_mat;
@@ -206,14 +204,14 @@ void V_SCORE::colorizeResult(){
         color_vec_[idx] = {r,g,b};
     }
 
-    // denoise_cloud_->colors_ = color_vec_;
+    // input_cloud_->colors_ = color_vec_;
 }
 
 void V_SCORE::visualizeResult(){
     // auto pose_sphere = geometry::TriangleMesh::CreateSphere(2);
     // pose_sphere->PaintUniformColor({0,1,0});
     // pose_sphere->Translate(camera_position_);
-    // visualization::DrawGeometries({denoise_cloud_},"V_SCORE RESULT",1920,1080,50,50);
+    // visualization::DrawGeometries({input_cloud_},"V_SCORE RESULT",1920,1080,50,50);
 }
 
 
@@ -238,7 +236,7 @@ std::vector<double> V_SCORE::getScores(){
 }
 
 pcl::PointCloud<PointType>::Ptr V_SCORE::getCloud(){
-    return denoise_cloud_;
+    return input_cloud_;
 }
 
 typedef std::pair<double,int> val_idx;
@@ -261,10 +259,10 @@ std::vector<int> V_SCORE::getTopIndex(int num){
     // for(int i=0; i<num; i++){
     //     sorted_idx.push_back(tmp[i].second);
     // }
-    // denoise_cloud_->colors_ = color_vec_;
+    // input_cloud_->colors_ = color_vec_;
     // std::vector<Eigen::Vector3d> test;
     // for(int ii:sorted_idx){
-    //     test.push_back(denoise_cloud_->points[ii]);
+    //     test.push_back(input_cloud_->points[ii]);
     // }
     // pcl::PointCloud<PointType>::Ptr test_cloud_(new pcl::PointCloud<PointType>());;
     // *test_cloud_ = test;
@@ -285,7 +283,7 @@ pcl::PointCloud<PointType>::Ptr V_SCORE::getTopScoredCloud(int num, std::vector<
 
     std::stable_sort(tmp.begin(),tmp.end(),comparator);
     for(int i=0; i<num; i++){
-        test_cloud_->points.push_back(denoise_cloud_->points[tmp[i].second]);
+        test_cloud_->points.push_back(input_cloud_->points[tmp[i].second]);
         scores.push_back(mix_score_vec_[tmp[i].second]);
         normals->points.push_back(normals_->points[tmp[i].second]);
     }
@@ -306,7 +304,7 @@ pcl::PointCloud<PointType>::Ptr V_SCORE::getTopScoredCloud(int num, std::vector<
 
     std::stable_sort(tmp.begin(),tmp.end(),comparator);
     for(int i=0; i<num; i++){
-        test_cloud_->points.push_back(denoise_cloud_->points[tmp[i].second]);  // ✅ 바로 추가
+        test_cloud_->points.push_back(input_cloud_->points[tmp[i].second]);
         scores.push_back(mix_score_vec_[tmp[i].second]);
     }
     return test_cloud_;
@@ -314,7 +312,7 @@ pcl::PointCloud<PointType>::Ptr V_SCORE::getTopScoredCloud(int num, std::vector<
 
 pcl::PointCloud<PointType>::Ptr V_SCORE::getTopScoredCloud(double ratio, std::vector<double> &scores){
     assert(ratio <= 1.0);
-    int num = static_cast<int>(denoise_cloud_->points.size() * ratio) ;
+    int num = static_cast<int>(input_cloud_->points.size() * ratio) ;
 
     std::vector<val_idx> tmp;
     // #pragma omp parallel for
@@ -327,7 +325,7 @@ pcl::PointCloud<PointType>::Ptr V_SCORE::getTopScoredCloud(double ratio, std::ve
 
     std::stable_sort(tmp.begin(),tmp.end(),comparator);
     for(int i=0; i<num; i++){
-        test_cloud_->points.push_back(denoise_cloud_->points[tmp[i].second]);  // ✅ 바로 추가
+        test_cloud_->points.push_back(input_cloud_->points[tmp[i].second]);  // ✅ 바로 추가
         scores.push_back(mix_score_vec_[tmp[i].second]);
     }
     return test_cloud_;
@@ -362,7 +360,7 @@ pcl::PointCloud<PointType>::Ptr V_SCORE::getTopScoredCloud(int num, pcl::PointCl
 
 pcl::PointCloud<PointType>::Ptr V_SCORE::getTopScoredCloudByScore(double score){
 
-    // denoise_cloud_->colors_ = color_vec_;
+    // input_cloud_->colors_ = color_vec_;
 
     // std::vector<Eigen::Vector3d> top_scored_points;
 
@@ -370,7 +368,7 @@ pcl::PointCloud<PointType>::Ptr V_SCORE::getTopScoredCloudByScore(double score){
 
     //     if(mix_score_vec_[i] > score){
 
-    //     top_scored_points.push_back(denoise_cloud_->points[i]);
+    //     top_scored_points.push_back(input_cloud_->points[i]);
 
     //     }
     // }

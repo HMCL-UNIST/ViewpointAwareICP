@@ -7,28 +7,43 @@
 ## Overall Architecture  
 <img src="./assets/GA_capture.png" width="600" height="350"/>
 
+## Algorithm description
+
+### 1st stage
+**Coarse Registration with Viewpoint <span style="color: blue;">Insensitive</span> Scoring** <span style="color: red;">(Section IV.B)</span>
+<img src="./assets/first_stage.png" width="600" height="350"/>
+
+
+### 2nd stage
+**Fine Registration with Viewpoint <span style="color: blue;">Sensitive</span> Scoring** <span style="color: red;">(Section IV.C)</span>
+<img src="./assets/second_stage.png" width="600" height="350"/>
+
 ## Build
 ### Dependencies
 This code is developed using the PCL (Point Cloud Library).  
 If you are using ROS, the PCL library will be automatically installed.  
 For non-ROS users, please install the [PCL library](https://github.com/PointCloudLibrary/pcl).
 
-### demo
+### example
 If you have Open3D installed, you can visualize the process and results.  
 (Note: The PCL visualizer may cause a segmentation fault error.)
 ```bash
 git clone https://github.com/HMCL-UNIST/ViewpointAwareICP.git
 cd ViewpointAwareICP
+
+# Before build, you need to change to pcd file path in demo.cpp and demo_vis.cpp like "/home/<user>/ViewpointAwareICP/pcd/tgt.pcd"
+# There are sample pcd file in /pcd which are obtained from lego loam with kitti 05 sequence
 mkdir build
 cmake ..
 make
+
 ./demo
-# with Open 3d
+# with Open3d
 ./demo_vis
 ```
 
-### Application
-**You need to ensure that source and target point cloud's origins are LiDAR Sensor position!!**
+## Application
+**You need to ensure that the source and target point cloud's origins are LiDAR Sensor position!!**\
 To use this code, simply place the following 4 files into your workspace:
 - v_score.h
 - v_score.cpp
@@ -42,14 +57,5 @@ To use this code, simply place the following 4 files into your workspace:
 TODO
 <!-- [![Video Label](https://img.youtube.com/vi/_Hyst8YsnRg/0.jpg)](https://www.youtube.com/watch?v=_Hyst8YsnRg) -->
 
-## Algorithm description
 
-### 1st stage
-**Coarse Registration with Viewpoint <span style="color: blue;">Insensitive</span> Scoring** <span style="color: red;">(Section IV.B)</span>
-<img src="./assets/first_stage.png" width="600" height="350"/>
-
-
-### 2nd stage
-**Fine Registration with Viewpoint <span style="color: blue;">Sensitive</span> Scoring** <span style="color: red;">(Section IV.C)</span>
-<img src="./assets/second_stage.png" width="600" height="350"/>
 

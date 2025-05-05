@@ -17,6 +17,8 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/registration/transformation_estimation_point_to_plane_lls_weighted.h>
 #include <pcl/registration/correspondence_estimation.h>
+#include <pcl/filters/statistical_outlier_removal.h>
+
 // #include <pcl_conversions/pcl_conversions.h>
 #include "v_score.h"
 // #include "icp_closedform.h"
@@ -39,6 +41,9 @@ private:
     bool initTgt_ = false;
     bool initGuess_ = false;
 
+    bool is_valid_src_pose = false;
+    bool is_valid_tgt_pose = false;
+
     bool converged_ = false;
 
     double corres_dist_ = 10.0;
@@ -51,7 +56,7 @@ private:
     std::vector<Eigen::Matrix4f> first_transformation_deltas_, second_transformation_deltas_;
     std::vector<double> src_scores, tgt_scores;
 
-
+    V_SCORE score_s, score_t;
     
 public:
     ViewpointAwareICP();
@@ -63,8 +68,10 @@ public:
     void setInitialGuess(Eigen::Isometry3d);
     // pcl::PointCloud<PointType>::Ptr computeNormals(pcl::PointCloud<PointType>::Ptr cloud);
     pcl::PointCloud<PointType>::Ptr computeNormals(pcl::PointCloud<pcl::PointXYZI>::Ptr cloud);
-
-    double getFitnessScoreNupdateWeights(pcl::CorrespondencesPtr corres, std::vector<double> weights);
+    pcl::PointCloud<PointType>::Ptr voxelDownsample(const pcl::PointCloud<PointType>::Ptr& cloud, float leaf_size);
+    pcl::PointCloud<PointType>::Ptr denoisePointCloud(const pcl::PointCloud<PointType>::Ptr& cloud, int mean_k = 3, double stddev_mul_thresh = 0.8);
+    double getFitnessScoreNupdateWeightsSecondStage(pcl::CorrespondencesPtr corres);
+    double getFitnessScoreNupdateWeightsFirstStage(pcl::CorrespondencesPtr corres);
     double getFitnessScoreNupdateUniformWeights(pcl::CorrespondencesPtr corres);
 
 
@@ -74,6 +81,10 @@ public:
     void setEuclideanFitnessEpsilon(double eps_euclidean_fitness) {eps_euclidean_fitness_ = eps_euclidean_fitness;}
     void align(pcl::PointCloud<PointType>& result_pc);
     void transformPointCloud(pcl::PointCloud<PointType>::Ptr cloudIn, Eigen::Matrix4d transformIn);
+
+    void isValidSourcePose(bool is_valid) {is_valid_src_pose = is_valid;}
+    void isValidTargetPose(bool is_valid) {is_valid_tgt_pose = is_valid;}
+
 
     bool hasConverged() {return converged_;}
     double getFitnessScore() {return fitness_score_;}

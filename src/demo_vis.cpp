@@ -36,6 +36,7 @@ int main(){
     std::string target_path = "/home/js/ViewpointAwareICP/pcd/tgt.pcd";
     std::string source_path = "/home/js/ViewpointAwareICP/pcd/src.pcd";
 
+
     pcl::PointCloud<pcl::PointXYZI>::Ptr src_cloud(new pcl::PointCloud<pcl::PointXYZI>());
     pcl::PointCloud<pcl::PointXYZI>::Ptr tgt_cloud(new pcl::PointCloud<pcl::PointXYZI>());
     
@@ -51,6 +52,7 @@ int main(){
             0.0,1.0,0.0,0.0,
             0.0,0.0,1.0,0.0,
             0.0,0.0,0.0,1.0;
+
     Eigen::Isometry3d init_guess;
     init_guess.matrix() = mat_;
 
@@ -63,20 +65,32 @@ int main(){
     vicp.setTransformationEpsilon(1e-6);
     vicp.setEuclideanFitnessEpsilon(0.5);
 
+    vicp.isValidSourcePose(true);
+
+    // Since Target point cloud is an accumulation of a sequence of keyframe point cloud from lego loam, it does not have certain viewpoint! 
+    vicp.isValidTargetPose(false); 
+
     pcl::PointCloud<PointType>::Ptr unused_result(new pcl::PointCloud<PointType>());
     vicp.align(*unused_result);
 
     Eigen::Isometry3d result;
     result = vicp.getFinalTransformation();
 
+
+    pcl::PointCloud<pcl::PointXYZI>::Ptr src_cloud_initguess(new pcl::PointCloud<pcl::PointXYZI>());
+    // *tgt_cloud_initguess = *src_cloud;
+    Eigen::Matrix4f tf = init_guess.matrix().cast<float>();
+    pcl::transformPointCloud(*src_cloud, *src_cloud_initguess, tf);
+
     auto source_point = std::make_shared<open3d::geometry::PointCloud>();
     auto target_point = std::make_shared<open3d::geometry::PointCloud>();
+    auto result_point = std::make_shared<open3d::geometry::PointCloud>();
 
     auto source_point_cp = std::make_shared<open3d::geometry::PointCloud>();
     auto source_point_cp2 = std::make_shared<open3d::geometry::PointCloud>();
     auto target_point_cp = std::make_shared<open3d::geometry::PointCloud>();
 
-    for (const auto& pt : src_cloud->points) {
+    for (const auto& pt : src_cloud_initguess->points) {
         source_point->points_.push_back(Eigen::Vector3d(pt.x, pt.y, pt.z));
         source_point_cp->points_.push_back(Eigen::Vector3d(pt.x, pt.y, pt.z));
         source_point_cp2->points_.push_back(Eigen::Vector3d(pt.x, pt.y, pt.z));
@@ -84,17 +98,19 @@ int main(){
     for (const auto& pt : tgt_cloud->points) {
         target_point->points_.push_back(Eigen::Vector3d(pt.x, pt.y, pt.z));
     }
-
-    auto axis = open3d::geometry::TriangleMesh::CreateCoordinateFrame(10., Eigen::Vector3d(1, 0, 0));
+    for (const auto& pt : unused_result->points) {
+        result_point->points_.push_back(Eigen::Vector3d(pt.x, pt.y, pt.z));
+    }
     auto cam = open3d::geometry::TriangleMesh::CreateCoordinateFrame(5., Eigen::Vector3d(0, 0, 0));
     source_point->PaintUniformColor({1,0,0}); 
     target_point->PaintUniformColor({0,1,0}); 
     source_point_cp->PaintUniformColor({1,0,0}); 
     source_point_cp2->PaintUniformColor({1,0,0}); 
+    result_point->PaintUniformColor({1,0,0}); 
+
     target_point_cp = target_point;
     
-    open3d::visualization::DrawGeometriesWithCustomAnimation({source_point, target_point, axis, cam}, "View", 1080,720);
-
+    open3d::visualization::DrawGeometriesWithCustomAnimation({source_point, target_point, cam}, "VICP init", 1080,720);
 
     auto target_point_weights = std::make_shared<open3d::geometry::PointCloud>();
     pcl::PointCloud<PointType>::Ptr filtered_target_cloud;
@@ -127,11 +143,10 @@ int main(){
 
     source_point->PaintUniformColor({1,1,1}); 
     // open3d::visualization::DrawGeometriesWithCustomAnimation({target_point_weights, source_point, source_position}, "Vis Weight", 1080,720);
-    open3d::visualization::DrawGeometriesWithCustomAnimation({target_point_weights, source_position}, "Vis Weight", 1080,720);
     source_point->PaintUniformColor({1,0,0}); 
 
     open3d::visualization::Visualizer vis;
-    vis.CreateVisualizerWindow("1",1280,720,50,50,true);
+    vis.CreateVisualizerWindow("1st Stage",1280,720,50,50,true);
     vis.AddGeometry({source_point});
     vis.AddGeometry({target_point});
     // vis.AddGeometry({correspondence_line_set});
@@ -151,7 +166,7 @@ int main(){
     vis.DestroyVisualizerWindow();
 
     open3d::visualization::Visualizer vis2;
-    vis2.CreateVisualizerWindow("2",1280,720,50,50,true);
+    vis2.CreateVisualizerWindow("2nd Stage",1280,720,50,50,true);
     vis2.AddGeometry({source_point});
     vis2.AddGeometry({target_point});
     vis2.Run();
@@ -165,6 +180,11 @@ int main(){
     }
     vis2.DestroyVisualizerWindow();
 
+    open3d::visualization::DrawGeometriesWithCustomAnimation({result_point, target_point}, "VICP result", 1080,720);
+
+    open3d::visualization::DrawGeometriesWithCustomAnimation({target_point_weights, source_position}, "Visibility Score of Target Point Cloud relative to result source pose", 1080,720);
+
+
     pcl::IterativeClosestPoint<pcl::PointXYZI, pcl::PointXYZI> icp;
     icp.setMaxCorrespondenceDistance(50);
     icp.setMaximumIterations(50);
@@ -173,7 +193,7 @@ int main(){
     icp.setRANSACIterations(0);
 
     // Align clouds using vanilla ICP
-    icp.setInputSource(src_cloud);
+    icp.setInputSource(src_cloud_initguess);
     icp.setInputTarget(tgt_cloud);
     pcl::PointCloud<pcl::PointXYZI>::Ptr icp_result(new pcl::PointCloud<pcl::PointXYZI>());
     icp.align(*icp_result); 
@@ -203,7 +223,7 @@ int main(){
     gicp.setEuclideanFitnessEpsilon(1e-6);
 
     // 기존에 사용하던 포인트 클라우드 타입 사용
-    gicp.setInputSource(src_cloud);
+    gicp.setInputSource(src_cloud_initguess);
     gicp.setInputTarget(tgt_cloud);
 
     pcl::PointCloud<pcl::PointXYZI>::Ptr gicp_result(new pcl::PointCloud<pcl::PointXYZI>());
@@ -227,31 +247,24 @@ int main(){
     vis4.Run();
     vis4.DestroyVisualizerWindow();
 
-    open3d::visualization::DrawGeometriesWithCustomAnimation({source_point, target_point}, "viewpoint icp", 1080,720);
 
-    // 1. 소스와 타겟 클라우드의 법선(노말) 계산
     pcl::NormalEstimation<pcl::PointXYZI, pcl::Normal> ne;
     pcl::search::KdTree<pcl::PointXYZI>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZI>());
     ne.setSearchMethod(tree);
     ne.setKSearch(10);
 
-    // 소스 클라우드 노말 계산
     pcl::PointCloud<pcl::Normal>::Ptr src_normals(new pcl::PointCloud<pcl::Normal>());
-    ne.setInputCloud(src_cloud);
+    ne.setInputCloud(src_cloud_initguess);
     ne.compute(*src_normals);
-    // 법선 정보를 포함하는 클라우드 (pcl::PointXYZINormal) 생성 – 소스
     pcl::PointCloud<pcl::PointXYZINormal>::Ptr src_cloud_normals(new pcl::PointCloud<pcl::PointXYZINormal>());
-    pcl::concatenateFields(*src_cloud, *src_normals, *src_cloud_normals);
+    pcl::concatenateFields(*src_cloud_initguess, *src_normals, *src_cloud_normals);
 
-    // 타겟 클라우드 노말 계산
     pcl::PointCloud<pcl::Normal>::Ptr tgt_normals(new pcl::PointCloud<pcl::Normal>());
     ne.setInputCloud(tgt_cloud);
     ne.compute(*tgt_normals);
-    // 타겟 클라우드에 법선 정보를 결합 – 타겟
     pcl::PointCloud<pcl::PointXYZINormal>::Ptr tgt_cloud_normals(new pcl::PointCloud<pcl::PointXYZINormal>());
     pcl::concatenateFields(*tgt_cloud, *tgt_normals, *tgt_cloud_normals);
 
-    // 2. Point-to-Plane ICP 수행 (법선 정보를 이용)
     pcl::IterativeClosestPoint<pcl::PointXYZINormal, pcl::PointXYZINormal> icp_ptp;
     icp_ptp.setTransformationEstimation(
         boost::shared_ptr<pcl::registration::TransformationEstimationPointToPlane<pcl::PointXYZINormal, pcl::PointXYZINormal> >(
@@ -273,14 +286,13 @@ int main(){
         std::cout << "Point-to-Plane ICP did not converge." << std::endl;
     }
 
-    // (선택사항) 결과를 PointXYZI 타입으로 복사하여 Open3D 시각화
     pcl::PointCloud<pcl::PointXYZI>::Ptr ptp_result_xyz(new pcl::PointCloud<pcl::PointXYZI>());
     pcl::copyPointCloud(*ptp_result, *ptp_result_xyz);
     auto o3d_ptp = std::make_shared<open3d::geometry::PointCloud>();
     for (const auto &pt : ptp_result_xyz->points) {
         o3d_ptp->points_.push_back(Eigen::Vector3d(pt.x, pt.y, pt.z));
     }
-    o3d_ptp->PaintUniformColor({1, 0, 0});  // 노란색
+    o3d_ptp->PaintUniformColor({1, 0, 0});
     open3d::visualization::DrawGeometriesWithCustomAnimation({o3d_ptp, target_point}, "Point-to-Plane ICP Result", 1080,720);
     
     return 0;

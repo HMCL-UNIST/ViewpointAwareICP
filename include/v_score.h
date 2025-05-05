@@ -13,7 +13,6 @@
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/search/kdtree.h>
 #include <pcl/features/normal_3d.h>
 #include <pcl/io/pcd_io.h>
@@ -31,7 +30,7 @@ class V_SCORE{
         Eigen::Vector3d camera_position_;
 
         pcl::PointCloud<PointType>::Ptr original_cloud_;
-        pcl::PointCloud<PointType>::Ptr denoise_cloud_;
+        pcl::PointCloud<PointType>::Ptr input_cloud_;
         pcl::PointCloud<PointType>::Ptr projected_cloud_;
         pcl::PointCloud<pcl::Normal>::Ptr normals_;
 
@@ -116,6 +115,9 @@ class V_SCORE{
     public:
         // V_SCORE(Eigen::Vector3d camera_position, pcl::PointCloud<PointType>::Ptr pointcloud);
         V_SCORE(Eigen::Vector3d camera_position, pcl::PointCloud<PointType>::Ptr pointcloud);
+        V_SCORE(){}
+
+        void initialize(Eigen::Vector3d camera_position, pcl::PointCloud<PointType>::Ptr pointcloud);
 
         void visualizeResult();
 
