@@ -203,7 +203,7 @@ int main(){
     source_point_cp->Transform(final_result.matrix().cast<double>());
 
     open3d::visualization::Visualizer vis3;
-    vis3.CreateVisualizerWindow("Vanila ICP",1280,720,50,50,true);
+    vis3.CreateVisualizerWindow("Vanila ICP Result",1280,720,50,50,true);
     vis3.AddGeometry({source_point_cp});
     vis3.AddGeometry({target_point_cp});
     vis3.Run();
@@ -222,7 +222,6 @@ int main(){
     gicp.setTransformationEpsilon(1e-6);
     gicp.setEuclideanFitnessEpsilon(1e-6);
 
-    // 기존에 사용하던 포인트 클라우드 타입 사용
     gicp.setInputSource(src_cloud_initguess);
     gicp.setInputTarget(tgt_cloud);
 
@@ -241,7 +240,7 @@ int main(){
     source_point_cp2->Transform(final_result2.matrix().cast<double>());
 
     open3d::visualization::Visualizer vis4;
-    vis4.CreateVisualizerWindow("Generalized ICP",1280,720,50,50,true);
+    vis4.CreateVisualizerWindow("Generalized ICP Result",1280,720,50,50,true);
     vis4.AddGeometry({source_point_cp2});
     vis4.AddGeometry({target_point_cp});
     vis4.Run();
