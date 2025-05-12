@@ -51,10 +51,9 @@ To use this code, simply place the following 4 files into your workspace:
 - viewpointAwareICP.cpp
 
 ## Experiment Results
-[![Video Label](https://img.youtube.com/vi/_Hyst8YsnRg/0.jpg)](https://www.youtube.com/watch?v=_Hyst8YsnRg)
+[![Video Label](https://img.youtube.com/vi/QGaBLPjgFBc/0.jpg)](https://www.youtube.com/watch?v=QGaBLPjgFBc)
 
-## Demo with LeGO-LOAM
-TODO
+
 <!-- [![Video Label](https://img.youtube.com/vi/_Hyst8YsnRg/0.jpg)](https://www.youtube.com/watch?v=_Hyst8YsnRg) -->
 
 
